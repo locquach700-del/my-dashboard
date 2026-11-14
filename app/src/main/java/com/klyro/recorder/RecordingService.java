@@ -17,6 +17,7 @@ import android.media.AudioRecord;
 import android.media.MediaCodec;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
+import android.media.MediaExtractor;
 import android.media.MediaMuxer;
 import android.media.MediaRecorder;
 import android.media.projection.MediaProjection;
@@ -64,7 +65,11 @@ public class RecordingService extends Service {
     private File tempFile;
     private boolean audioOnly;
     private boolean internalAudioOnly;
+    private boolean internalAudioWithVideo;
     private boolean withMic;
+    private File audioTempFile;
+    private long videoStartRealtimeUs;
+    private long playbackPtsOffsetUs;
     private volatile boolean paused;
     private volatile boolean finished;
     private long startedAt;
@@ -121,6 +126,7 @@ public class RecordingService extends Service {
         String mode = intent.getStringExtra(EXTRA_MODE);
         audioOnly = "audio".equals(mode);
         internalAudioOnly = "internal_audio".equals(mode);
+        internalAudioWithVideo = "video".equals(mode) && intent.getBooleanExtra("app_audio", false);
         withMic = intent.getBooleanExtra("mic", false);
         requestedWidth = intent.getIntExtra("width", 1280);
         requestedHeight = intent.getIntExtra("height", 720);
@@ -157,6 +163,9 @@ public class RecordingService extends Service {
 
             String stamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new java.util.Date());
             tempFile = new File(folder, "Klyro_" + stamp + (isAudioFile ? ".m4a" : ".mp4"));
+            if (internalAudioWithVideo) {
+                audioTempFile = new File(folder, "Klyro_" + stamp + "_audio.m4a");
+            }
 
             if (internalAudioOnly) {
                 startInternalAudioCapture(intent);
@@ -192,6 +201,7 @@ public class RecordingService extends Service {
                     recorder.start();
                 } else {
                     startVideoCapture(intent);
+                    if (internalAudioWithVideo) startInternalAudioCapture(intent);
                 }
             }
 
@@ -245,6 +255,7 @@ public class RecordingService extends Service {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surface, null, handler);
         if (virtualDisplay == null) throw new IllegalStateException("Unable to create screen display");
         recorder.start();
+        videoStartRealtimeUs = SystemClock.elapsedRealtimeNanos() / 1000L;
     }
 
     private Intent getProjectionData(Intent intent) {
@@ -273,7 +284,7 @@ public class RecordingService extends Service {
     }
 
     private void startInternalAudioCapture(Intent intent) throws Exception {
-        projection = createProjection(intent, getProjectionData(intent));
+        if (projection == null) projection = createProjection(intent, getProjectionData(intent));
 
         AudioPlaybackCaptureConfiguration captureConfig =
                 new AudioPlaybackCaptureConfiguration.Builder(projection)
@@ -311,10 +322,14 @@ public class RecordingService extends Service {
         playbackEncoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC);
         playbackEncoder.configure(encodedFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         playbackEncoder.start();
-        playbackMuxer = new MediaMuxer(tempFile.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        File playbackOutput = internalAudioWithVideo ? audioTempFile : tempFile;
+        if (playbackOutput == null) throw new IllegalStateException("Thiếu đường dẫn tệp âm thanh");
+        playbackMuxer = new MediaMuxer(playbackOutput.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
         playbackRunning = true;
         playbackFailure = null;
         encodedAudioFrames = 0L;
+        playbackPtsOffsetUs = internalAudioWithVideo && videoStartRealtimeUs > 0L
+                ? Math.max(0L, SystemClock.elapsedRealtimeNanos() / 1000L - videoStartRealtimeUs) : 0L;
         playbackRecord.startRecording();
         playbackThread = new Thread(this::runPlaybackEncoder, "Klyro-Playback-Audio");
         playbackThread.start();
@@ -355,7 +370,7 @@ public class RecordingService extends Service {
                         input.clear();
                         input.order(ByteOrder.nativeOrder());
                         for (int i = 0; i < samples; i++) input.putShort(pcm[i]);
-                        long pts = encodedAudioFrames * 1000000L / PLAYBACK_SAMPLE_RATE;
+                        long pts = playbackPtsOffsetUs + encodedAudioFrames * 1000000L / PLAYBACK_SAMPLE_RATE;
                         encodedAudioFrames += samples / PLAYBACK_CHANNELS;
                         playbackEncoder.queueInputBuffer(inputIndex, 0, samples * 2, pts, 0);
                         queued = true;
@@ -375,7 +390,7 @@ public class RecordingService extends Service {
                     tries++;
                 } while (inputIndex < 0 && tries < 20);
                 if (inputIndex >= 0) {
-                    long pts = encodedAudioFrames * 1000000L / PLAYBACK_SAMPLE_RATE;
+                    long pts = playbackPtsOffsetUs + encodedAudioFrames * 1000000L / PLAYBACK_SAMPLE_RATE;
                     playbackEncoder.queueInputBuffer(inputIndex, 0, 0, pts, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                     eosQueued = true;
                 }
@@ -560,11 +575,14 @@ public class RecordingService extends Service {
         if (finished) return;
         finished = true;
         handler.removeCallbacks(ticker);
-        boolean hadRecorder = recorder != null || internalAudioOnly;
+        boolean hasPlaybackCapture = internalAudioOnly || internalAudioWithVideo;
+        boolean hadRecorder = recorder != null || hasPlaybackCapture;
         boolean recorderFinalized = true;
+        boolean playbackFinalized = true;
         boolean publishedSuccessfully = false;
+        File publishSource = tempFile;
         try {
-            if (internalAudioOnly) recorderFinalized = finishInternalAudioCapture();
+            if (hasPlaybackCapture) playbackFinalized = finishInternalAudioCapture();
 
             if (recorder != null) {
                 try {
@@ -593,8 +611,24 @@ public class RecordingService extends Service {
             stopService(new Intent(this, FloatingControlsService.class));
             Uri saved = null;
             boolean audioFile = audioOnly || internalAudioOnly;
-            if (recorderFinalized && tempFile != null && tempFile.exists() && tempFile.length() > 1024) {
-                saved = publishFile(tempFile, audioFile);
+            if (internalAudioWithVideo) {
+                if (playbackFinalized && audioTempFile != null && audioTempFile.exists()
+                        && audioTempFile.length() > 1024 && tempFile != null && tempFile.exists()) {
+                    try {
+                        File merged = new File(tempFile.getParentFile(),
+                                tempFile.getName().replace(".mp4", "_with_audio.mp4"));
+                        mergeVideoAndAppAudio(tempFile, audioTempFile, merged);
+                        publishSource = merged;
+                    } catch (Exception mergeError) {
+                        broadcastError("Không ghép được tiếng ứng dụng; Klyro sẽ lưu phần video đã quay. " +
+                                (mergeError.getMessage() == null ? "" : mergeError.getMessage()));
+                    }
+                } else {
+                    broadcastError("Thu tiếng ứng dụng bị gián đoạn; Klyro vẫn cố lưu phần video đã quay.");
+                }
+            }
+            if (recorderFinalized && publishSource != null && publishSource.exists() && publishSource.length() > 1024) {
+                saved = publishFile(publishSource, audioFile);
             }
             if (saved != null) {
                 publishedSuccessfully = true;
@@ -605,7 +639,7 @@ public class RecordingService extends Service {
             } else if (hadRecorder) {
                 if (!recorderFinalized && tempFile != null && tempFile.exists()) {
                     broadcastError("Bộ ghi bị ngắt đột ngột; tệp tạm được giữ lại trong thư mục dữ liệu Klyro vì chưa thể hoàn tất MP4.");
-                } else if (internalAudioOnly && playbackFailure != null) {
+                } else if (hasPlaybackCapture && playbackFailure != null) {
                     broadcastError("Không thể hoàn tất âm thanh ứng dụng: " + playbackFailure);
                 } else {
                     broadcastError("Bản ghi quá ngắn hoặc không thể lưu");
@@ -614,14 +648,90 @@ public class RecordingService extends Service {
         } catch (Exception e) {
             broadcastError("Lỗi khi lưu bản ghi: " + (e.getMessage() == null ? "không rõ" : e.getMessage()));
         } finally {
-            if (tempFile != null && tempFile.exists()
-                    && (publishedSuccessfully || tempFile.length() <= 1024)) {
+            if (publishedSuccessfully) {
+                if (tempFile != null) tempFile.delete();
+                if (audioTempFile != null) audioTempFile.delete();
+                if (publishSource != null && publishSource != tempFile) publishSource.delete();
+            } else if (tempFile != null && tempFile.exists() && tempFile.length() <= 1024) {
                 tempFile.delete();
             }
             getSharedPreferences("klyro", MODE_PRIVATE).edit()
                     .putBoolean("recording_active", false).apply();
             stopForeground(true);
             stopSelf();
+        }
+    }
+
+
+    private void mergeVideoAndAppAudio(File videoFile, File audioFile, File outputFile) throws Exception {
+        MediaExtractor videoExtractor = new MediaExtractor();
+        MediaExtractor audioExtractor = new MediaExtractor();
+        MediaMuxer muxer = null;
+        boolean muxerStartedLocal = false;
+        try {
+            videoExtractor.setDataSource(videoFile.getAbsolutePath());
+            audioExtractor.setDataSource(audioFile.getAbsolutePath());
+            int videoInputTrack = -1;
+            int audioInputTrack = -1;
+            for (int i = 0; i < videoExtractor.getTrackCount(); i++) {
+                MediaFormat format = videoExtractor.getTrackFormat(i);
+                String mime = format.getString(MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("video/") && videoInputTrack < 0) videoInputTrack = i;
+            }
+            for (int i = 0; i < audioExtractor.getTrackCount(); i++) {
+                MediaFormat format = audioExtractor.getTrackFormat(i);
+                String mime = format.getString(MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("audio/") && audioInputTrack < 0) audioInputTrack = i;
+            }
+            if (videoInputTrack < 0) throw new IllegalStateException("Không tìm thấy luồng hình ảnh trong MP4");
+            if (audioInputTrack < 0) throw new IllegalStateException("Tệp thu tiếng ứng dụng không có track âm thanh");
+            videoExtractor.selectTrack(videoInputTrack);
+            audioExtractor.selectTrack(audioInputTrack);
+            muxer = new MediaMuxer(outputFile.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            int videoOutputTrack = muxer.addTrack(videoExtractor.getTrackFormat(videoInputTrack));
+            int audioOutputTrack = muxer.addTrack(audioExtractor.getTrackFormat(audioInputTrack));
+            muxer.start();
+            muxerStartedLocal = true;
+            ByteBuffer videoBuffer = ByteBuffer.allocate(2 * 1024 * 1024);
+            ByteBuffer audioBuffer = ByteBuffer.allocate(256 * 1024);
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            long videoTime = videoExtractor.getSampleTime();
+            long audioTime = audioExtractor.getSampleTime();
+            while (videoTime >= 0L || audioTime >= 0L) {
+                boolean writeVideo = audioTime < 0L || (videoTime >= 0L && videoTime <= audioTime);
+                MediaExtractor source = writeVideo ? videoExtractor : audioExtractor;
+                ByteBuffer target = writeVideo ? videoBuffer : audioBuffer;
+                long sampleSize = source.getSampleSize();
+                if (sampleSize < 0L) {
+                    if (writeVideo) videoTime = -1L; else audioTime = -1L;
+                    continue;
+                }
+                if (sampleSize > target.capacity()) {
+                    int capacity = (int)Math.min(Integer.MAX_VALUE - 8L, sampleSize + 65536L);
+                    target = ByteBuffer.allocate(capacity);
+                    if (writeVideo) videoBuffer = target; else audioBuffer = target;
+                }
+                target.clear();
+                int size = source.readSampleData(target, 0);
+                if (size < 0) {
+                    if (writeVideo) videoTime = -1L; else audioTime = -1L;
+                    continue;
+                }
+                info.set(0, size, source.getSampleTime(), source.getSampleFlags());
+                muxer.writeSampleData(writeVideo ? videoOutputTrack : audioOutputTrack, target, info);
+                source.advance();
+                if (writeVideo) videoTime = videoExtractor.getSampleTime();
+                else audioTime = audioExtractor.getSampleTime();
+            }
+            muxer.stop();
+            muxerStartedLocal = false;
+        } finally {
+            if (muxer != null) {
+                if (muxerStartedLocal) { try { muxer.stop(); } catch (Exception ignored) {} }
+                try { muxer.release(); } catch (Exception ignored) {}
+            }
+            try { videoExtractor.release(); } catch (Exception ignored) {}
+            try { audioExtractor.release(); } catch (Exception ignored) {}
         }
     }
 
@@ -691,7 +801,8 @@ public class RecordingService extends Service {
                 ? new Notification.Builder(this, CHANNEL_ID) : new Notification.Builder(this);
         b.setSmallIcon(android.R.drawable.presence_video_online)
                 .setContentTitle("Klyro đang ghi")
-                .setContentText(paused ? "Đã tạm dừng" : (internalAudioOnly ? "Đang thu âm thanh ứng dụng" : "Đang ghi"))
+                .setContentText(paused ? "Đã tạm dừng" : (internalAudioOnly ? "Đang thu âm thanh ứng dụng" :
+                        (internalAudioWithVideo ? "Quay màn hình + âm thanh ứng dụng" : "Đang ghi")))
                 .setContentIntent(content).setOngoing(true).setOnlyAlertOnce(true)
                 .addAction(android.R.drawable.ic_media_pause, paused ? "Tiếp tục" : "Tạm dừng", pause)
                 .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dừng", stop);
@@ -704,7 +815,7 @@ public class RecordingService extends Service {
     }
 
     @Override public void onTaskRemoved(Intent rootIntent) {
-        if (!finished && (recorder != null || playbackRunning || internalAudioOnly)) {
+        if (!finished && (recorder != null || playbackRunning || internalAudioOnly || internalAudioWithVideo)) {
             broadcastError("Ứng dụng bị đóng khỏi danh sách gần đây; Klyro đang cố hoàn tất và lưu bản ghi.");
             stopRecording();
         }
@@ -713,7 +824,7 @@ public class RecordingService extends Service {
 
     @Override public void onDestroy() {
         handler.removeCallbacks(ticker);
-        if (!finished && (recorder != null || playbackRunning || internalAudioOnly)) stopRecording();
+        if (!finished && (recorder != null || playbackRunning || internalAudioOnly || internalAudioWithVideo)) stopRecording();
         super.onDestroy();
     }
 
