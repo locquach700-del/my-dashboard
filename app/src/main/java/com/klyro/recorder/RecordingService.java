@@ -99,9 +99,9 @@ public class RecordingService extends Service {
         bitrate = intent.getIntExtra("bitrate", 2000000);
         int foregroundType = 0;
         if (!audioOnly) foregroundType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
-        if (audioOnly || withMic) foregroundType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+        if ((audioOnly || withMic) && Build.VERSION.SDK_INT >= 30) foregroundType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
         try {
-            if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, buildNotification(), foregroundType);
+            if (Build.VERSION.SDK_INT >= 30) startForeground(NOTIFICATION_ID, buildNotification(), foregroundType);
             else startForeground(NOTIFICATION_ID, buildNotification());
             File folder = getExternalFilesDir(audioOnly ? Environment.DIRECTORY_MUSIC : Environment.DIRECTORY_MOVIES);
             if (folder == null) folder = getFilesDir();
@@ -136,7 +136,8 @@ public class RecordingService extends Service {
                 }
                 int[] safe = findSafeVideoSize(requestedWidth, requestedHeight, fps);
                 recorder.setVideoSize(safe[0], safe[1]);
-                recorder.setVideoFrameRate(Math.min(120, Math.max(24, fps)));
+                int safeFps = findSafeFrameRate(safe[0], safe[1], fps);
+                recorder.setVideoFrameRate(safeFps);
                 recorder.setVideoEncodingBitRate(bitrate);
                 recorder.setOutputFile(tempFile.getAbsolutePath());
                 recorder.prepare();
@@ -183,6 +184,19 @@ public class RecordingService extends Service {
             } catch (Exception ignored) {}
         }
         return new int[]{1280,720};
+    }
+
+    private int findSafeFrameRate(int width, int height, int requested) {
+        int[] choices = {requested, 60, 30, 24};
+        for (int candidate : choices) {
+            if (candidate > requested) continue;
+            try {
+                MediaFormat f = MediaFormat.createVideoFormat("video/avc", width, height);
+                f.setInteger(MediaFormat.KEY_FRAME_RATE, candidate);
+                if (new MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(f) != null) return candidate;
+            } catch (Exception ignored) {}
+        }
+        return 30;
     }
 
     private void pauseRecording() {
