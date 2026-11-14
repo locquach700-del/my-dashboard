@@ -140,7 +140,7 @@ public class MainActivity extends Activity {
         header.setPadding(0, dp(8), 0, dp(14));
         TextView brand = text("Klyro", 25, Color.rgb(25,31,45), true);
         header.addView(brand, new LinearLayout.LayoutParams(0, dp(42), 1));
-        TextView version = text("SCREEN STUDIO  •  1.0", 10, Color.rgb(126,137,157), true);
+        TextView version = text("SCREEN STUDIO  •  1.2.0", 10, Color.rgb(126,137,157), true);
         header.addView(version);
         shell.addView(header);
 
@@ -227,7 +227,7 @@ public class MainActivity extends Activity {
         status.addView(top);
         statusText = text("Sẵn sàng",20,Color.rgb(25,31,45),true);
         status.addView(statusText,margin(0,dp(12),0,dp(4)));
-        TextView hint = text("Video MP4 hoặc ghi âm micro M4A",12,Color.rgb(124,134,153),false);
+        TextView hint = text("Video MP4 kèm tiếng ứng dụng hoặc ghi âm riêng",12,Color.rgb(124,134,153),false);
         status.addView(hint);
         body.addView(status,margin(0,0,0,dp(14)));
 
@@ -255,9 +255,19 @@ public class MainActivity extends Activity {
         LinearLayout opts = card();
         opts.setOrientation(LinearLayout.VERTICAL);
         opts.setPadding(dp(14),dp(8),dp(14),dp(8));
+        Switch appAudio = switcher(I18n.t(this,"app_audio_video"),prefs.getBoolean("app_audio_video",true));
         Switch mic = switcher(I18n.t(this,"microphone"),prefs.getBoolean("mic",false));
-        mic.setOnCheckedChangeListener((b,v)->prefs.edit().putBoolean("mic",v).apply());
+        appAudio.setOnCheckedChangeListener((b,v)->{
+            prefs.edit().putBoolean("app_audio_video",v).putBoolean("mic",v ? false : prefs.getBoolean("mic",false)).apply();
+            if (v) mic.setChecked(false);
+        });
+        mic.setOnCheckedChangeListener((b,v)->{
+            prefs.edit().putBoolean("mic",v).putBoolean("app_audio_video",v ? false : prefs.getBoolean("app_audio_video",true)).apply();
+            if (v) appAudio.setChecked(false);
+        });
+        appAudio.setEnabled("video".equals(recordMode));
         mic.setEnabled("video".equals(recordMode));
+        opts.addView(appAudio);
         opts.addView(mic);
         Switch countdown = switcher(I18n.t(this,"countdown"),prefs.getBoolean("countdown",true));
         countdown.setOnCheckedChangeListener((b,v)->prefs.edit().putBoolean("countdown",v).apply());
@@ -332,9 +342,10 @@ public class MainActivity extends Activity {
             return;
         }
 
-        pendingMode = "video";
-        boolean needMic = prefs.getBoolean("mic",false);
-        if (needMic && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        boolean appAudio = prefs.getBoolean("app_audio_video",true);
+        pendingMode = appAudio ? "video_app_audio" : "video";
+        boolean needAudioPermission = appAudio || prefs.getBoolean("mic",false);
+        if (needAudioPermission && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             waitingForAudio = true;
             requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},REQ_AUDIO);
             return;
@@ -366,7 +377,7 @@ public class MainActivity extends Activity {
     };
 
     private void launchPendingMode() {
-        if ("video".equals(pendingMode) || "internal_audio".equals(pendingMode)) {
+        if ("video".equals(pendingMode) || "video_app_audio".equals(pendingMode) || "internal_audio".equals(pendingMode)) {
             requestProjection();
         } else {
             startAudioOnly();
@@ -414,8 +425,10 @@ public class MainActivity extends Activity {
         service.putExtra("fps",selectedFps());
         service.putExtra("bitrate",selectedBitrate());
         service.putExtra("mic",prefs.getBoolean("mic",false));
+        service.putExtra("app_audio",prefs.getBoolean("app_audio_video",true));
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-        if (statusText != null) statusText.setText("Đang ghi màn hình");
+        if (statusText != null) statusText.setText(prefs.getBoolean("app_audio_video",true)
+                ? "Đang quay màn hình + âm thanh ứng dụng" : "Đang ghi màn hình");
     }
 
     private int[] selectedOutputSize() {
