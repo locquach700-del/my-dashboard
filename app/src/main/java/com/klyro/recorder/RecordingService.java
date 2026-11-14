@@ -48,6 +48,7 @@ public class RecordingService extends Service {
 
     private MediaRecorder recorder;
     private MediaProjection projection;
+    private MediaProjection.Callback projectionCallback;
     private VirtualDisplay virtualDisplay;
     private File tempFile;
     private boolean audioOnly;
@@ -142,6 +143,12 @@ public class RecordingService extends Service {
                 recorder.setOutputFile(tempFile.getAbsolutePath());
                 recorder.prepare();
                 Surface surface = recorder.getSurface();
+                projectionCallback = new MediaProjection.Callback() {
+                    @Override public void onStop() {
+                        if (!finished) handler.post(() -> stopRecording());
+                    }
+                };
+                projection.registerCallback(projectionCallback, handler);
                 DisplayMetrics metrics = getResources().getDisplayMetrics();
                 int density = metrics.densityDpi;
                 virtualDisplay = projection.createVirtualDisplay(
@@ -242,7 +249,12 @@ public class RecordingService extends Service {
                 recorder = null;
             }
             if (virtualDisplay != null) { virtualDisplay.release(); virtualDisplay = null; }
-            if (projection != null) { projection.stop(); projection = null; }
+            if (projection != null) {
+                try { if (projectionCallback != null) projection.unregisterCallback(projectionCallback); } catch (Exception ignored) {}
+                projectionCallback = null;
+                projection.stop();
+                projection = null;
+            }
             stopService(new Intent(this, FloatingControlsService.class));
             Uri saved = null;
             if (tempFile != null && tempFile.exists() && tempFile.length() > 1024) saved = publishFile(tempFile, audioOnly);
