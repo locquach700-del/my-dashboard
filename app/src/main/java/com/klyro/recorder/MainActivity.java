@@ -61,8 +61,11 @@ public class MainActivity extends Activity {
     private TextView statusText;
     private TextView timerText;
     private TextView[] navItems = new TextView[4];
+    private TextView[] navLabels = new TextView[4];
+    private LinearLayout[] navContainers = new LinearLayout[4];
     private int page = 0;
     private String recordMode = "video";
+    private String pendingMode = "video";
     private boolean waitingForOverlay;
     private boolean waitingForAudio;
     private boolean pendingVideoStart;
@@ -166,6 +169,8 @@ public class MainActivity extends Activity {
             item.addView(icon);
             item.addView(label);
             navItems[i] = icon;
+            navLabels[i] = label;
+            navContainers[i] = item;
             item.setPadding(dp(10),dp(4),dp(10),dp(4));
             item.setOnClickListener(v -> showPage(target));
             nav.addView(item, new LinearLayout.LayoutParams(0, dp(54), 1));
@@ -182,6 +187,18 @@ public class MainActivity extends Activity {
         else if (which == 1) buildHistory();
         else if (which == 2) buildSettings();
         else buildTap();
+        updateNavigationSelection();
+    }
+
+    private void updateNavigationSelection() {
+        for (int i = 0; i < navContainers.length; i++) {
+            boolean selected = i == page;
+            int color = selected ? Color.rgb(42,105,236) : Color.rgb(110,120,140);
+            navContainers[i].setBackground(round(selected ? Color.rgb(232,240,255) : Color.TRANSPARENT, dp(14)));
+            navItems[i].setTextColor(color);
+            navLabels[i].setTextColor(color);
+            navContainers[i].setAlpha(selected ? 1f : 0.82f);
+        }
     }
 
     private ScrollView scroll() {
