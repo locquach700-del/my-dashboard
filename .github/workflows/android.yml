@@ -45,6 +45,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Klyro-APK
-          path: Klyro-Screen-Studio-1.0.0.apk
+          path: Klyro-Screen-Studio-1.1.0.apk
           if-no-files-found: error
           retention-days: 30
