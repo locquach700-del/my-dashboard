@@ -26,6 +26,8 @@ import android.os.Handler;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.database.Cursor;
+import android.media.MediaMetadataRetriever;
+import android.content.ContentValues;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -48,6 +50,10 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 
 public class MainActivity extends Activity {
     private static final int REQ_CAPTURE = 410;
@@ -103,6 +109,7 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 23) w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         buildShell();
         showPage(0);
+        new Thread(this::recoverPendingRecordings,"Klyro-Recovery").start();
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 50);
         }
@@ -471,6 +478,81 @@ public class MainActivity extends Activity {
                 waitingForAudio=false;
                 Toast.makeText(this,"Cần quyền âm thanh của Android để ghi micro hoặc thu âm thanh ứng dụng.",Toast.LENGTH_LONG).show();
             }
+        }
+    }
+
+    private void recoverPendingRecordings() {
+        SharedPreferences state = getSharedPreferences(PREFS, MODE_PRIVATE);
+        long heartbeat = state.getLong("recording_heartbeat", 0L);
+        boolean active = state.getBoolean("recording_active", false);
+        long now = System.currentTimeMillis();
+        if (active && heartbeat > 0L && now - heartbeat < 15000L) return;
+        if (active) state.edit().putBoolean("recording_active", false).apply();
+
+        int recovered = 0;
+        File[] roots = {
+                getExternalFilesDir(Environment.DIRECTORY_MOVIES),
+                getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+        };
+        for (File root : roots) {
+            if (root == null || !root.isDirectory()) continue;
+            File[] files = root.listFiles();
+            if (files == null) continue;
+            for (File source : files) {
+                if (!source.isFile() || !source.getName().startsWith("Klyro_")) continue;
+                if (source.length() < 2048L || now - source.lastModified() < 10000L) continue;
+                boolean audio = source.getName().toLowerCase(Locale.ROOT).endsWith(".m4a");
+                MediaMetadataRetriever metadata = new MediaMetadataRetriever();
+                boolean playable = false;
+                try {
+                    metadata.setDataSource(source.getAbsolutePath());
+                    String duration = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+                    playable = duration != null && Long.parseLong(duration) >= 1000L;
+                } catch (Exception ignored) {
+                    playable = false;
+                } finally {
+                    try { metadata.release(); } catch (Exception ignored) {}
+                }
+                if (!playable) continue;
+
+                android.content.ContentResolver resolver = getContentResolver();
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, source.getName());
+                values.put(MediaStore.MediaColumns.MIME_TYPE, audio ? "audio/mp4" : "video/mp4");
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH,
+                        audio ? Environment.DIRECTORY_MUSIC + "/Klyro/" : Environment.DIRECTORY_MOVIES + "/Klyro/");
+                values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                Uri collection = audio
+                        ? MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                        : MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                Uri target = null;
+                try {
+                    target = resolver.insert(collection, values);
+                    if (target == null) continue;
+                    try (InputStream in = new FileInputStream(source);
+                         OutputStream out = resolver.openOutputStream(target, "w")) {
+                        if (out == null) throw new IllegalStateException("Cannot open recovery output");
+                        byte[] buffer = new byte[64 * 1024];
+                        int count;
+                        while ((count = in.read(buffer)) > 0) out.write(buffer, 0, count);
+                        out.flush();
+                    }
+                    ContentValues ready = new ContentValues();
+                    ready.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                    resolver.update(target, ready, null, null);
+                    if (source.delete()) recovered++;
+                } catch (Exception e) {
+                    if (target != null) {
+                        try { resolver.delete(target, null, null); } catch (Exception ignored) {}
+                    }
+                }
+            }
+        }
+        if (recovered > 0) {
+            final int count = recovered;
+            runOnUiThread(() -> Toast.makeText(this,
+                    "Klyro đã khôi phục " + count + " bản ghi vào thư viện.",
+                    Toast.LENGTH_LONG).show());
         }
     }
 
