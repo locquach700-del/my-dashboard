@@ -65,18 +65,6 @@ public class MainActivity extends Activity {
     private boolean pendingVideoStart;
     private int countdownLeft;
     private final Handler handler = new Handler();
-    private final Runnable countdownTick = new Runnable() {
-        @Override public void run() {
-            if (countdownLeft <= 0) {
-                if (statusText != null) statusText.setText("Đang mở quyền quay màn hình…");
-                requestProjection();
-                return;
-            }
-            if (statusText != null) statusText.setText("Bắt đầu sau " + countdownLeft + "…");
-            countdownLeft--;
-            handler.postDelayed(this, 1000);
-        }
-    };
 
     private final BroadcastReceiver recordingReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
@@ -133,7 +121,7 @@ public class MainActivity extends Activity {
             waitingForOverlay = false;
             if (pendingVideoStart) {
                 pendingVideoStart = false;
-                beginCountdownOrProjection();
+                startCountdown(true);
             }
         }
     }
@@ -229,8 +217,8 @@ public class MainActivity extends Activity {
 
         body.addView(text("CHẾ ĐỘ GHI",11,Color.rgb(105,117,139),true),margin(2,0,0,dp(8)));
         LinearLayout modes = row();
-        View video = modeCard("▣",I18n.t(this,"video"),"MP4 • Màn hình", "video".equals(recordMode));
-        View audio = modeCard("♫",I18n.t(this,"audio_only"),"M4A • Micro", "audio".equals(recordMode));
+        View video = modeCard("▣",I18n.t(this,"video"),"MP4 • Màn hình", "video".equals(recordMode), "video");
+        View audio = modeCard("♫",I18n.t(this,"audio_only"),"M4A • Micro", "audio".equals(recordMode), "audio");
         modes.addView(video,new LinearLayout.LayoutParams(0,dp(92),1));
         modes.addView(space(dp(10)));
         modes.addView(audio,new LinearLayout.LayoutParams(0,dp(92),1));
@@ -274,7 +262,7 @@ public class MainActivity extends Activity {
         body.addView(text(I18n.t(this,"audio_note"),11,Color.rgb(125,135,154),false),margin(0,dp(10),0,dp(18)));
     }
 
-    private View modeCard(String glyph,String title,String sub,boolean selected) {
+    private View modeCard(String glyph,String title,String sub,boolean selected,String mode) {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setPadding(dp(12),dp(10),dp(12),dp(10));
@@ -283,7 +271,7 @@ public class MainActivity extends Activity {
         c.addView(i);
         c.addView(text(title,13,Color.rgb(28,37,54),true),margin(0,dp(4),0,0));
         c.addView(text(sub,10,Color.rgb(125,135,154),false));
-        c.setOnClickListener(v->{ recordMode = "Chỉ âm thanh".equals(title) || "Audio only".equals(title) || "音声のみ".equals(title) || "오디오만".equals(title) || "仅音频".equals(title) || "เสียงเท่านั้น".equals(title) || "Audio saja".equals(title) ? "audio" : "video"; showPage(0); });
+        c.setOnClickListener(v->{ recordMode = mode; showPage(0); });
         return c;
     }
 
