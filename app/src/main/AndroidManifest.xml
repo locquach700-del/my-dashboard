@@ -9,7 +9,7 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@drawable/klyro_launcher"
         android:label="Klyro Screen Studio"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
