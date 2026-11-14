@@ -121,17 +121,6 @@ public class MainActivity extends Activity {
         try { unregisterReceiver(recordingReceiver); } catch (Exception ignored) {}
         super.onStop();
     }
-    @Override protected void onResume() {
-        super.onResume();
-        if (waitingForOverlay) {
-            waitingForOverlay = false;
-            if (pendingVideoStart) {
-                pendingVideoStart = false;
-                startCountdown(true);
-            }
-        }
-    }
-
     private void buildShell() {
         LinearLayout shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
@@ -326,47 +315,41 @@ public class MainActivity extends Activity {
 
     private void attemptStart() {
         if ("audio".equals(recordMode)) {
+            pendingMode = "app".equals(prefs.getString("audio_source","app")) ? "internal_audio" : "audio";
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 waitingForAudio = true;
                 requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},REQ_AUDIO);
                 return;
             }
-            startCountdown(false);
+            startCountdownForPendingMode();
             return;
         }
+
+        pendingMode = "video";
         boolean needMic = prefs.getBoolean("mic",false);
         if (needMic && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             waitingForAudio = true;
-            pendingVideoStart = true;
             requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},REQ_AUDIO);
             return;
         }
-        if (prefs.getBoolean("floating",true) && Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
-            waitingForOverlay = true;
-            pendingVideoStart = true;
-            Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName()));
-            startActivityForResult(i,REQ_OVERLAY);
-            return;
-        }
-        startCountdown(true);
+        startCountdownForPendingMode();
     }
 
-    private void startCountdown(boolean video) {
+    private void startCountdownForPendingMode() {
         if (prefs.getBoolean("countdown",true)) {
             countdownLeft = 3;
-            statusText.setText("Bắt đầu sau 3…");
+            if (statusText != null) statusText.setText("Bắt đầu sau 3…");
             handler.removeCallbacks(countdownTick);
             handler.post(countdownTick);
-            countdownRunnableVideo = video;
         } else {
-            if (video) requestProjection(); else startAudioOnly();
+            launchPendingMode();
         }
     }
-    private boolean countdownRunnableVideo = true;
+
     private final Runnable countdownTick = new Runnable() {
         @Override public void run() {
             if (countdownLeft <= 0) {
-                if (countdownRunnableVideo) requestProjection(); else startAudioOnly();
+                launchPendingMode();
                 return;
             }
             if (statusText != null) statusText.setText("Bắt đầu sau "+countdownLeft+"…");
@@ -375,22 +358,43 @@ public class MainActivity extends Activity {
         }
     };
 
+    private void launchPendingMode() {
+        if ("video".equals(pendingMode) || "internal_audio".equals(pendingMode)) {
+            requestProjection();
+        } else {
+            startAudioOnly();
+        }
+    }
+
     private void requestProjection() {
         try {
             MediaProjectionManager m = (MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
             startActivityForResult(m.createScreenCaptureIntent(),REQ_CAPTURE);
         } catch (Exception e) {
-            Toast.makeText(this,"Không thể mở quyền quay màn hình",Toast.LENGTH_LONG).show();
+            Toast.makeText(this,"Không thể mở quyền thu âm thanh/quay màn hình",Toast.LENGTH_LONG).show();
         }
     }
+
     private void startAudioOnly() {
         Intent service = new Intent(this,RecordingService.class);
         service.setAction(RecordingService.ACTION_START);
         service.putExtra(RecordingService.EXTRA_MODE,"audio");
         service.putExtra("mic",true);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-        statusText.setText("Đang ghi âm micro");
+        if (statusText != null) statusText.setText("Đang ghi âm micro");
     }
+
+    private void startInternalAudioService(int resultCode,Intent data) {
+        Intent service = new Intent(this,RecordingService.class);
+        service.setAction(RecordingService.ACTION_START);
+        service.putExtra(RecordingService.EXTRA_MODE,"internal_audio");
+        service.putExtra(RecordingService.EXTRA_RESULT,resultCode);
+        service.putExtra(RecordingService.EXTRA_DATA,data);
+        service.putExtra("mic",false);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+        if (statusText != null) statusText.setText("Đang thu âm thanh ứng dụng (không dùng micro)");
+    }
+
     private void startVideoService(int resultCode,Intent data) {
         int[] size = selectedOutputSize();
         Intent service = new Intent(this,RecordingService.class);
@@ -404,7 +408,7 @@ public class MainActivity extends Activity {
         service.putExtra("bitrate",selectedBitrate());
         service.putExtra("mic",prefs.getBoolean("mic",false));
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-        statusText.setText("Đang ghi màn hình");
+        if (statusText != null) statusText.setText("Đang ghi màn hình");
     }
 
     private int[] selectedOutputSize() {
@@ -440,8 +444,12 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
         super.onActivityResult(requestCode,resultCode,data);
         if (requestCode==REQ_CAPTURE) {
-            if (resultCode==RESULT_OK && data!=null) startVideoService(resultCode,data);
-            else { if (statusText!=null) statusText.setText("Bạn đã huỷ quyền quay màn hình"); }
+            if (resultCode==RESULT_OK && data!=null) {
+                if ("internal_audio".equals(pendingMode)) startInternalAudioService(resultCode,data);
+                else startVideoService(resultCode,data);
+            } else {
+                if (statusText!=null) statusText.setText("Bạn đã huỷ quyền thu âm thanh/quay màn hình");
+            }
         } else if (requestCode==REQ_IMAGE) {
             if (resultCode==RESULT_OK && data!=null && data.getData()!=null) {
                 Uri uri=data.getData();
@@ -450,12 +458,6 @@ public class MainActivity extends Activity {
                 Toast.makeText(this,"Đã chọn ảnh dấu chạm",Toast.LENGTH_SHORT).show();
                 showPage(3);
             }
-        } else if (requestCode==REQ_OVERLAY) {
-            waitingForOverlay=false;
-            if (pendingVideoStart) {
-                pendingVideoStart=false;
-                startCountdown(true);
-            }
         }
     }
 
@@ -463,11 +465,11 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode,permissions,results);
         if (requestCode==REQ_AUDIO) {
             if (results.length>0 && results[0]==PackageManager.PERMISSION_GRANTED) {
-                if (pendingVideoStart) { pendingVideoStart=false; startCountdown(true); }
-                else if (waitingForAudio) { waitingForAudio=false; startCountdown(false); }
+                waitingForAudio=false;
+                startCountdownForPendingMode();
             } else {
-                waitingForAudio=false; pendingVideoStart=false;
-                Toast.makeText(this,"Cần quyền micro để ghi âm.",Toast.LENGTH_LONG).show();
+                waitingForAudio=false;
+                Toast.makeText(this,"Cần quyền âm thanh của Android để ghi micro hoặc thu âm thanh ứng dụng.",Toast.LENGTH_LONG).show();
             }
         }
     }
