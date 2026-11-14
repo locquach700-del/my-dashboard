@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tap_service_description">Tuỳ chọn: hiển thị dấu chạm gần vị trí của thành phần giao diện được nhấn. Ứng dụng chỉ dùng vị trí vùng nhấn để vẽ dấu trực quan trên thiết bị; không đọc hoặc lưu nội dung màn hình.</string>
+</resources>
