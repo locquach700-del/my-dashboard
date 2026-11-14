@@ -583,9 +583,11 @@ public class MainActivity extends Activity {
                 LinearLayout top=row();
                 TextView icon=text(audio?"♫":"▣",20,Color.rgb(42,105,236),true);
                 top.addView(icon);
-                LinearLayout details=column(); details.addView(text(name,13,Color.rgb(31,41,60),true));
+                LinearLayout details=column();
                 String dt=new SimpleDateFormat("dd/MM/yyyy  •  HH:mm",Locale.getDefault()).format(new Date(date));
-                details.addView(text(dt,10,Color.rgb(125,135,154),false),margin(0,dp(3),0,0));
+                details.addView(text(dt,13,Color.rgb(31,41,60),true));
+                details.addView(text(name,10,Color.rgb(125,135,154),false),margin(0,dp(3),0,0));
+                
                 top.addView(details,new LinearLayout.LayoutParams(0,-2,1));
                 top.addView(text(formatBytes(bytes),10,Color.rgb(99,110,131),true));
                 card.addView(top);
