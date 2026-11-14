@@ -238,11 +238,23 @@ public class MainActivity extends Activity {
         body.addView(text("CHẾ ĐỘ GHI",11,Color.rgb(105,117,139),true),margin(2,0,0,dp(8)));
         LinearLayout modes = row();
         View video = modeCard("▣",I18n.t(this,"video"),"MP4 • Màn hình", "video".equals(recordMode), "video");
-        View audio = modeCard("♫",I18n.t(this,"audio_only"),"M4A • Micro", "audio".equals(recordMode), "audio");
+        View audio = modeCard("♫",I18n.t(this,"audio_only"),"M4A • Chọn nguồn âm thanh", "audio".equals(recordMode), "audio");
         modes.addView(video,new LinearLayout.LayoutParams(0,dp(92),1));
         modes.addView(space(dp(10)));
         modes.addView(audio,new LinearLayout.LayoutParams(0,dp(92),1));
         body.addView(modes,margin(0,0,0,dp(13)));
+
+        if ("audio".equals(recordMode)) {
+            body.addView(text("NGUỒN ÂM THANH",11,Color.rgb(105,117,139),true),margin(2,0,0,dp(8)));
+            LinearLayout sources = row();
+            View appAudio = audioSourceCard("♫",I18n.t(this,"audio_app"),"Không thu micro", "app");
+            View microphoneAudio = audioSourceCard("◉",I18n.t(this,"audio_mic"),"Thu âm thanh bên ngoài", "mic");
+            sources.addView(appAudio,new LinearLayout.LayoutParams(0,dp(88),1));
+            sources.addView(space(dp(10)));
+            sources.addView(microphoneAudio,new LinearLayout.LayoutParams(0,dp(88),1));
+            body.addView(sources,margin(0,0,0,dp(10)));
+            body.addView(text(I18n.t(this,"audio_capture_note"),11,Color.rgb(115,126,145),false),margin(2,0,2,dp(12)));
+        }
 
         LinearLayout opts = card();
         opts.setOrientation(LinearLayout.VERTICAL);
@@ -293,6 +305,23 @@ public class MainActivity extends Activity {
         c.addView(text(sub,10,Color.rgb(125,135,154),false));
         c.setOnClickListener(v->{ recordMode = mode; showPage(0); });
         return c;
+    }
+
+    private View audioSourceCard(String glyph,String title,String sub,String source) {
+        boolean selected = source.equals(prefs.getString("audio_source","app"));
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12),dp(10),dp(12),dp(10));
+        card.setBackground(round(selected ? Color.rgb(232,240,255) : Color.WHITE,dp(15)));
+        TextView icon = text(glyph,19,selected ? Color.rgb(42,105,236) : Color.rgb(105,117,139),true);
+        card.addView(icon);
+        card.addView(text(title,12,Color.rgb(31,41,60),true),margin(0,dp(3),0,0));
+        card.addView(text(sub,10,Color.rgb(125,135,154),false));
+        card.setOnClickListener(v -> {
+            prefs.edit().putString("audio_source",source).apply();
+            showPage(0);
+        });
+        return card;
     }
 
     private void attemptStart() {
