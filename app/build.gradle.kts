@@ -14,19 +14,9 @@ android {
         versionName = "1.0.0"
     }
 
-    signingConfigs {
-        create("release") {
-            storeFile = rootProject.file("signing/klyro-release.jks")
-            storePassword = "klyro-dev-2026"
-            keyAlias = "klyro"
-            keyPassword = "klyro-dev-2026"
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
