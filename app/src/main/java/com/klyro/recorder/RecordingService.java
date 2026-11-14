@@ -328,9 +328,11 @@ public class RecordingService extends Service {
                 if (source == null) break;
                 int samples = source.read(pcm, 0, pcm.length, AudioRecord.READ_BLOCKING);
                 if (samples == AudioRecord.ERROR_DEAD_OBJECT) {
+                    if (!playbackRunning) break;
                     throw new IllegalStateException("Luồng âm thanh hệ thống đã bị ngắt");
                 }
                 if (samples < 0) {
+                    if (!playbackRunning) break;
                     throw new IllegalStateException("Không thể đọc âm thanh ứng dụng: " + samples);
                 }
                 if (samples == 0 || paused) {
@@ -376,6 +378,7 @@ public class RecordingService extends Service {
         } catch (Exception e) {
             playbackFailure = e.getMessage() == null ? "Lỗi thu âm thanh ứng dụng" : e.getMessage();
         } finally {
+            playbackRunning = false;
             closePlaybackPipeline();
             if (playbackFailure != null && !finished) {
                 handler.post(() -> {
@@ -443,7 +446,7 @@ public class RecordingService extends Service {
         muxerTrack = -1;
     }
 
-    private void finishInternalAudioCapture() {
+    private boolean finishInternalAudioCapture() {
         playbackRunning = false;
         AudioRecord source = playbackRecord;
         if (source != null) {
@@ -453,13 +456,15 @@ public class RecordingService extends Service {
         }
         Thread worker = playbackThread;
         if (worker != null && worker != Thread.currentThread()) {
-            try { worker.join(10000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            try { worker.join(15000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         }
-        if (worker != null && worker.isAlive()) {
+        boolean finalized = worker == null || !worker.isAlive();
+        if (!finalized) {
             worker.interrupt();
-            broadcastError("Android chưa trả bộ thu âm kịp thời; tệp có thể thiếu phần cuối.");
+            broadcastError("Android chưa trả bộ thu âm kịp thời; tệp tạm được giữ lại thay vì lưu tệp M4A chưa hoàn tất.");
         }
         playbackThread = null;
+        return finalized;
     }
 
     private int[] findSafeVideoSize(int width, int height, int frameRate) {
@@ -552,7 +557,7 @@ public class RecordingService extends Service {
         boolean hadRecorder = recorder != null || internalAudioOnly;
         boolean recorderFinalized = true;
         try {
-            if (internalAudioOnly) finishInternalAudioCapture();
+            if (internalAudioOnly) recorderFinalized = finishInternalAudioCapture();
 
             if (recorder != null) {
                 try {
