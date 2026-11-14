@@ -94,6 +94,8 @@ public class RecordingService extends Service {
             tick.putExtra("elapsed", elapsed());
             tick.putExtra("paused", paused);
             sendBroadcast(tick);
+            getSharedPreferences("klyro", MODE_PRIVATE).edit()
+                    .putLong("recording_heartbeat", SystemClock.elapsedRealtime()).apply();
             updateNotification();
             handler.postDelayed(this, 1000);
         }
@@ -140,6 +142,10 @@ public class RecordingService extends Service {
             } else {
                 startForeground(NOTIFICATION_ID, buildNotification());
             }
+
+            getSharedPreferences("klyro", MODE_PRIVATE).edit()
+                    .putBoolean("recording_active", true)
+                    .putLong("recording_heartbeat", SystemClock.elapsedRealtime()).apply();
 
             boolean isAudioFile = audioOnly || internalAudioOnly;
             File folder = getExternalFilesDir(isAudioFile ? Environment.DIRECTORY_MUSIC : Environment.DIRECTORY_MOVIES);
@@ -612,6 +618,8 @@ public class RecordingService extends Service {
                     && (publishedSuccessfully || tempFile.length() <= 1024)) {
                 tempFile.delete();
             }
+            getSharedPreferences("klyro", MODE_PRIVATE).edit()
+                    .putBoolean("recording_active", false).apply();
             stopForeground(true);
             stopSelf();
         }
