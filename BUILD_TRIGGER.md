@@ -1,1 +1,0 @@
-This marker triggers the first Klyro Screen Studio CI build. The workflow compiles the Android 10+ app and publishes the APK as a Klyro-APK artifact.
