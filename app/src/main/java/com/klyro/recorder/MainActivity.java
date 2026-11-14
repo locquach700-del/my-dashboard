@@ -280,7 +280,7 @@ public class MainActivity extends Activity {
         timerText = text("00:00",12,Color.rgb(125,135,154),false);
         timerText.setGravity(Gravity.CENTER);
         body.addView(timerText);
-        body.addView(text(I18n.t(this,"audio_note"),11,Color.rgb(125,135,154),false),margin(0,dp(10),0,dp(18)));
+        body.addView(text(I18n.t(this,"video_audio_note"),11,Color.rgb(125,135,154),false),margin(0,dp(10),0,dp(18)));
     }
 
     private View modeCard(String glyph,String title,String sub,boolean selected,String mode) {
