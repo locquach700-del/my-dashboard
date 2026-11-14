@@ -556,6 +556,7 @@ public class RecordingService extends Service {
         handler.removeCallbacks(ticker);
         boolean hadRecorder = recorder != null || internalAudioOnly;
         boolean recorderFinalized = true;
+        boolean publishedSuccessfully = false;
         try {
             if (internalAudioOnly) recorderFinalized = finishInternalAudioCapture();
 
@@ -590,6 +591,7 @@ public class RecordingService extends Service {
                 saved = publishFile(tempFile, audioFile);
             }
             if (saved != null) {
+                publishedSuccessfully = true;
                 Intent done = new Intent(ACTION_SAVED).setPackage(getPackageName());
                 done.putExtra("uri", saved.toString());
                 done.putExtra("audio", audioFile);
@@ -606,7 +608,8 @@ public class RecordingService extends Service {
         } catch (Exception e) {
             broadcastError("Lỗi khi lưu bản ghi: " + (e.getMessage() == null ? "không rõ" : e.getMessage()));
         } finally {
-            if (tempFile != null && tempFile.exists() && (recorderFinalized || tempFile.length() <= 1024)) {
+            if (tempFile != null && tempFile.exists()
+                    && (publishedSuccessfully || tempFile.length() <= 1024)) {
                 tempFile.delete();
             }
             stopForeground(true);
@@ -690,6 +693,14 @@ public class RecordingService extends Service {
     private void updateNotification() {
         NotificationManager n = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         n.notify(NOTIFICATION_ID, buildNotification());
+    }
+
+    @Override public void onTaskRemoved(Intent rootIntent) {
+        if (!finished && (recorder != null || playbackRunning || internalAudioOnly)) {
+            broadcastError("Ứng dụng bị đóng khỏi danh sách gần đây; Klyro đang cố hoàn tất và lưu bản ghi.");
+            stopRecording();
+        }
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override public void onDestroy() {
