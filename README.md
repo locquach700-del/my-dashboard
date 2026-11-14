@@ -4,7 +4,7 @@ A native Android screen recorder for Android 10 (API 29)+.
 
 ## Build
 
-GitHub Actions builds a signed APK on every push to main and when manually dispatched. Download the Klyro-APK artifact from the workflow run.
+GitHub Actions builds an installable, Android-debug-signed APK when the finalized build commit is pushed to main (or when manually dispatched). Download the Klyro-APK artifact from the workflow run.
 
 ## Features in this first implementation
 
@@ -26,4 +26,4 @@ The tap marker service is opt-in and only draws a local highlight around accessi
 
 ## Signing
 
-The workflow signs the installable APK with the repository's private development keystore. Keep this repository private and do not publish the keystore. This is a personal sideload/testing key, not a Play Store production signing setup.
+The workflow uses Android Gradle's automatically generated debug signing key. The APK is signed and installable for testing, but a fresh CI runner may generate a different debug certificate, so a future build may require uninstalling the previous build before installing the new one. This is not a Play Store production signing setup.
