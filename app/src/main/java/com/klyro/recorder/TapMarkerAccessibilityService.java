@@ -113,9 +113,9 @@ public class TapMarkerAccessibilityService extends AccessibilityService {
             if (bitmap != null) {
                 paint.setAlpha((int)(255*alpha)); paint.setStyle(Paint.Style.FILL);
                 RectF dst = new RectF(cx-r,cy-r,cx+r,cy+r);
-                canvas.save(); canvas.clipPath(new android.graphics.Path(){{
-                    addCircle(cx,cy,r,Direction.CW);
-                }});
+                android.graphics.Path clip = new android.graphics.Path();
+                clip.addCircle(cx,cy,r,android.graphics.Path.Direction.CW);
+                canvas.save(); canvas.clipPath(clip);
                 canvas.drawBitmap(bitmap,null,dst,paint); canvas.restore();
             } else {
                 paint.setColor(color); paint.setAlpha((int)(255*alpha)); paint.setStyle(Paint.Style.FILL);
