@@ -8,6 +8,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Path;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -609,7 +612,15 @@ public class MainActivity extends Activity {
         private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Handler h=new Handler();
         private float phase;
-        TapPreview(Context c){super(c); post(new Runnable(){public void run(){phase=(phase+.045f)%1f;invalidate();h.postDelayed(this,32);}});}
+        private Bitmap customBitmap;
+        TapPreview(Context c){
+            super(c);
+            try {
+                String selected=prefs.getString("tap_image", "");
+                if(!selected.isEmpty()) try(java.io.InputStream in=getContentResolver().openInputStream(Uri.parse(selected))) { customBitmap=BitmapFactory.decodeStream(in); }
+            } catch(Exception ignored) { customBitmap=null; }
+            post(new Runnable(){public void run(){phase=(phase+.045f)%1f;invalidate();h.postDelayed(this,32);}});
+        }
         @Override protected void onDraw(Canvas c){
             super.onDraw(c);
             float cx=getWidth()/2f,cy=getHeight()/2f;
@@ -617,7 +628,11 @@ public class MainActivity extends Activity {
             int color; try{color=Color.parseColor(prefs.getString("tap_color","#FFFFFF"));}catch(Exception e){color=Color.WHITE;}
             int alpha=Math.max(12,Math.min(255,prefs.getInt("tap_opacity",90)*255/100));
             float r=dp(prefs.getInt("tap_size",34))*.62f;
-            paint.setColor(color); paint.setAlpha(alpha); paint.setStyle(Paint.Style.FILL); c.drawCircle(cx,cy,r,paint);
+            paint.setColor(color); paint.setAlpha(alpha); paint.setStyle(Paint.Style.FILL);
+            if(customBitmap!=null){
+                Path clip=new Path(); clip.addCircle(cx,cy,r,Path.Direction.CW);
+                c.save(); c.clipPath(clip); c.drawBitmap(customBitmap,null,new RectF(cx-r,cy-r,cx+r,cy+r),paint); c.restore();
+            } else c.drawCircle(cx,cy,r,paint);
             paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(dp(2)); paint.setAlpha((int)(alpha*(1-phase)));
             String eff=prefs.getString("tap_effect","wave");
             float radius="zoom".equals(eff)?r*(1+phase):r*(1.2f+phase*2.0f);
