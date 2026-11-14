@@ -1,0 +1,19 @@
+name: Klyro CI Runner Diagnostic
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  runner-check:
+    name: Verify GitHub-hosted runner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print runner environment
+        run: |
+          echo "Klyro runner started"
+          echo "OS: $RUNNER_OS"
+          echo "Runner: $RUNNER_NAME"
