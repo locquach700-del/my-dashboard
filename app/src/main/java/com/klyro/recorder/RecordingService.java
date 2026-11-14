@@ -95,7 +95,7 @@ public class RecordingService extends Service {
             tick.putExtra("paused", paused);
             sendBroadcast(tick);
             getSharedPreferences("klyro", MODE_PRIVATE).edit()
-                    .putLong("recording_heartbeat", SystemClock.elapsedRealtime()).apply();
+                    .putLong("recording_heartbeat", System.currentTimeMillis()).apply();
             updateNotification();
             handler.postDelayed(this, 1000);
         }
